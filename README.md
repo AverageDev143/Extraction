@@ -1,154 +1,170 @@
 # Extraction
-A simple tool that lets you capture and export an existing Linux installation into a portable, reusable form.
 
-Extraction is built for people who want to take a system they’ve already set up  packages, configs, structure, everything and turn it into something they can move, duplicate, or restore anywhere. Instead of reinstalling and reconfiguring your environment from scratch, you can snapshot your current install and reuse it on new hardware, VMs, or fresh drives.
+A tool that captures your existing Linux installation and puts it onto another drive — fully bootable, with everything intact.
 
-What it’s good for:
+Extraction is for people who want to take a system they've already set up — packages, configs, dotfiles, all of `/home` — and move it somewhere else without starting from scratch. Run it, get a bootable copy, use it however you want.
 
-Migrating your setup to another machine
-
-Backing up a fully configured system
-
-Spinning up identical environments quickly
-
-Experimenting without risking your main install
-
-It keeps things simple. Run it, get a portable version of your system, and you’re free to use it however you want  no complicated steps, no rebuilding your environment from zero.
-
-Guide
-----------------------------------------------
- The tool has exactly **two things it does**:
-
-| Command | What it's for |
-|---|---|
-| **`extract`** | Copy *this machine, right now* onto a drive |
-| **`clone`** | Copy *any* Linux install — this one, or one sitting on another disk — onto a drive |
-
-Both do the same thing under the hood (partition → copy everything →
-fix up booting) — `extract` is just a shortcut for "clone the system
-I'm currently running."
-
-Works with any Arch install: BIOS or UEFI, GRUB or systemd-boot,
-ext4/btrfs/xfs, and plain, encrypted (LUKS), or LVM setups.
+**What it's good for:**
+- Migrating your setup to a new machine
+- Keeping a fully configured system as a backup
+- Spinning up identical environments on different hardware
+- Experimenting on a USB without touching your main install
 
 ---
 
-## 1. Install what it needs
+## How it works
+
+The tool has exactly two commands:
+
+| Command | What it does |
+|---|---|
+| `extract` | Copy **this machine, right now** onto a drive |
+| `clone` | Copy **any** Linux install — this one, or one on another disk — onto a drive |
+
+Both do the same thing under the hood (partition → copy everything → fix up booting). `extract` is just a shortcut for "clone the system I'm currently running."
+
+Works with any Arch install: BIOS or UEFI, GRUB or systemd-boot, ext4/btrfs/xfs, and plain, encrypted (LUKS), or LVM setups.
+
+---
+
+## Quickstart
+
+### 1. Install dependencies
 
 ```bash
 sudo pacman -S rsync parted dosfstools arch-install-scripts
 ```
 
-If you plan to use btrfs or xfs on the target drive instead of the
-default ext4, also install `btrfs-progs` or `xfsprogs`.
+If you want to use btrfs or xfs on the target drive instead of the default ext4, also install `btrfs-progs` or `xfsprogs`.
 
-## 2. Plug in a USB drive (or identify a target disk)
+### 2. Find your target drive
 
-Find its device name so you don't wipe the wrong thing:
-
-```bash
-sudo ./extraction+ list
-```
-
-This prints all your drives. Look for the one you just plugged in by
-its size — it'll be something like `/dev/sdb`. **Use the whole-disk
-name (`/dev/sdb`), not a partition (`/dev/sdb1`)** — the tool handles
-partitioning for you.
-
-## 3. Run it
-
-**Easiest way — no arguments, just answer the prompts:**
+Plug in a USB drive (or identify which disk you want to write to), then run:
 
 ```bash
-sudo ./extraction+
+sudo ./extraction.sh list
 ```
 
-It'll show you the menu:
-Extract this install — clone the system you're running right now onto a drive
-Clone a Linux install — copy an existing install (this one, or another disk) onto a different drive
+This prints every block device on the machine — name, size, filesystem, label, mount point, and model — plus your running system's root device and detected boot mode. Find your target by size.
+
+> **Use the whole-disk name (`/dev/sdb`), not a partition (`/dev/sdb1`).** The tool handles partitioning for you.
+
+### 3. Run it
+
+**Easiest — no arguments, just answer the prompts:**
+
+```bash
+sudo ./extraction.sh
+```
+
+You'll see:
+
+```
+1) Extract this install   — clone the system you're running right now onto a drive
+2) Clone a Linux install  — copy an existing install (this one or another disk) onto a drive
 q) Quit
-
-Pick `1` to put your current machine on the USB. Pick `2` if you want
-to clone some *other* install (e.g. an old internal drive) onto a new
-disk.
-
-**Or skip the menu and run it directly:**
-
-```bash
-# Put this machine on a USB:
-sudo ./extraction+ extract /dev/sdb
-
-# Clone a different install (e.g. an old drive) onto a new one:
-sudo ./extraction+ clone /dev/sda2 /dev/sdb
 ```
 
-Either way, it will:
-1. Show you what's on the target disk and ask you to type `YES` to
-   confirm wiping it.
-2. Partition and format it.
-3. Copy everything over — apps, settings, your whole `/home`, package
-   database, AUR/Flatpak/Docker data. Not just a bare system.
-4. Fix up the copy so it can actually boot on different hardware
-   (broader driver support in the initramfs, bootloader reinstalled
-   so it doesn't depend on this machine's boot menu entries).
+Pick `1` to clone your current machine. Pick `2` to clone a different install — it'll ask for the source partition (e.g. `/dev/sda2`) and the target disk.
 
-When it's done, you can boot the drive on pretty much any machine by
-picking it in that machine's boot menu (F12 / F2 / Del at startup,
-depending on the computer).
-
-## 4. Double-check before rebooting into it (optional but recommended)
+**Or run it directly, skipping the menu:**
 
 ```bash
-sudo ./extraction+ verify /dev/sdb2   # or /dev/sdb1 if it's a single-partition (BIOS) drive
+# Clone this machine onto a USB:
+sudo ./extraction.sh extract /dev/sdb
+
+# Clone a different install onto a new disk:
+sudo ./extraction.sh clone /dev/sda2 /dev/sdb
 ```
 
-This mounts the drive read-only and checks that a kernel, a
-bootloader, and a sane fstab are all present — without touching
-anything.
+Either way, the tool will:
+
+1. Show what's on the target disk and ask you to type `YES` to confirm wiping it
+2. Wipe and partition the disk (GPT + EFI partition for UEFI, MBR for BIOS)
+3. Format the partitions (ext4 by default, or whatever you pass with `--fs`)
+4. Check you have enough space on the target before starting the copy
+5. Copy everything over via rsync — installed apps, package database, configs, all of `/home`, AUR/Flatpak/Docker data
+6. Generate a fresh UUID-based fstab for the new partitions
+7. Widen the initramfs: adds broad storage/USB/driver modules and removes the `autodetect` hook that would tie it to this machine's hardware — your existing hooks (`encrypt`, `lvm2`, `mdadm_udev`, etc.) are left untouched
+8. Reinstall the bootloader with `--removable` so it boots without depending on this machine's NVRAM entries
+9. Remove stale swapfile entries from fstab
+10. Reset `/etc/machine-id` so the clone gets a fresh identity on first boot
+
+When it's done, you can boot the drive on pretty much any machine by picking it in the firmware boot menu (usually `F12`, `F2`, or `Del` at startup).
+
+### 4. Verify before rebooting (optional but recommended)
+
+```bash
+# UEFI drive (two partitions — pass the root partition, not the EFI one):
+sudo ./extraction.sh verify /dev/sdb2
+
+# BIOS drive (single partition):
+sudo ./extraction.sh verify /dev/sdb1
+```
+
+This mounts the partition read-only and checks:
+
+- `/etc/fstab`, `/etc/passwd`, `/etc/os-release` are present
+- At least one kernel (`/boot/vmlinuz-*`) exists
+- A bootloader config is present (GRUB directory or systemd-boot entries)
+- Warns if `/etc/crypttab` has active entries with disk-specific UUIDs
+- Prints the detected filesystem type, ESP mountpoint, and full fstab contents
+
+Nothing is written — it unmounts cleanly when done.
 
 ---
 
 ## Good to know
 
-- **Run this from a live/booted Linux environment** — an Arch ISO, or
-  the machine you're extracting *from*. Never run it on a disk that's
-  currently mounted as `/` for something *other* than the source.
-- **It refuses to wipe the disk you're currently booted from.** No
-  need to worry about accidentally destroying your own running system.
-- **Encrypted (LUKS) or LVM installs**: your setup is preserved as-is
-  — the tool only strips the one setting that would otherwise tie the
-  copy to your exact current hardware. It'll also warn you if it sees
-  LUKS or a RAID array, since their IDs are specific to the original
-  disk and may need a manual update if you move to different physical
-  media.
-- **After moving to different hardware**, still worth checking by
-  hand: NVIDIA/proprietary graphics drivers, and any VPN or network
-  config tied to the old machine.
+- **Run from a live environment or the machine you're extracting from.** An Arch ISO works fine. Never run it on a disk that's currently mounted as `/` for something other than the source.
+- **It will never wipe the disk your running system boots from.** The tool resolves the parent disk of both the target and your running root and refuses if they match.
+- **LUKS and LVM installs are preserved as-is.** The tool warns you if it detects an active `crypttab` or `mdadm.conf`, since those UUIDs are disk-specific and may need updating if you move to different physical media.
+- **After moving to new hardware**, still worth checking manually: proprietary GPU drivers (NVIDIA especially), and any VPN or network config tied to the old machine's hardware addresses.
 
-## Options, if you need them
+---
 
-These all go anywhere on the command line:
+## Options
+
+These flags work anywhere on the command line:
 
 | Flag | Effect |
 |---|---|
-| `--dry-run` | Show exactly what would happen — nothing is touched |
-| `--force` | Skip the "is there enough space" check |
-| `--fs=btrfs` (or `xfs`) | Use that filesystem on the target instead of ext4 |
-| `--bios` / `--uefi` | Force the partition style, instead of auto-detecting |
-| `--keep-machine-id` | Don't reset the target's machine identity |
+| `--dry-run` | Print exactly what would happen — nothing is written |
+| `--force` | Skip the free-space check |
+| `--fs=ext4` / `--fs=btrfs` / `--fs=xfs` | Filesystem for the target (default: ext4) |
+| `--bios` / `--uefi` | Force the partition scheme instead of auto-detecting from this machine |
+| `--keep-machine-id` | Don't reset `/etc/machine-id` on the target |
+| `-v` / `--version` | Print the version and exit |
 
-Example: `sudo ./extraction+ extract /dev/sdb --fs=btrfs --dry-run`
+**Examples:**
+
+```bash
+# Preview what would happen without touching anything:
+sudo ./extraction.sh extract /dev/sdb --dry-run
+
+# Use btrfs on the target:
+sudo ./extraction.sh extract /dev/sdb --fs=btrfs
+
+# Force BIOS-style partitioning even from a UEFI machine:
+sudo ./extraction.sh extract /dev/sdb --bios
+
+# Combine flags — they go anywhere on the line:
+sudo ./extraction.sh extract /dev/sdb --fs=btrfs --dry-run
+```
+
+---
 
 ## Command reference
 
-sudo extraction+ interactive menu
-sudo extraction+ extract <target_disk> clone THIS machine onto target_disk
-sudo extraction+ clone <source> <target_disk> clone an existing install onto target_disk
-sudo extraction+ list show drives + this machine's boot mode
-sudo extraction+ verify <root_partition> sanity-check a drive before booting it
-
+```
+sudo ./extraction.sh                              interactive menu
+sudo ./extraction.sh extract <target_disk>        clone this machine onto target_disk
+sudo ./extraction.sh clone <source> <target>      clone an existing install onto target
+sudo ./extraction.sh list                         show drives and this machine's boot mode
+sudo ./extraction.sh verify <root_partition>      sanity-check a drive before booting it
+```
 
 For `clone`, `<source>` can be:
 - `/` — this running system (same as `extract`)
-- `/dev/sdXN` — a partition with a Linux install on it (mounted read-only for you automatically)
-- a folder path — if you've already mounted something there yourself
+- `/dev/sdXN` — a partition with a Linux install on it (mounted read-only automatically)
+- A folder path — if you've already mounted it yourself
